@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import '../models/app_features.dart';
 import '../main.dart';
+import 'login_screen.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -8,36 +11,49 @@ class SplashScreen extends StatefulWidget {
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen>
-    with SingleTickerProviderStateMixin {
+class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _scale;
+  final _storage = const FlutterSecureStorage();
 
   @override
   void initState() {
     super.initState();
-
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 900),
-    );
-
+    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 900));
     _scale = CurvedAnimation(parent: _controller, curve: Curves.easeOutBack);
     _controller.forward();
+    _checkSession();
+  }
 
-    Future.delayed(const Duration(seconds: 2), () {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const MainScaffold()),
-      );
-    });
+  Future<void> _checkSession() async {
+    await Future.delayed(const Duration(seconds: 2));
+    final token = await _storage.read(key: 'auth_token');
+    final username = await _storage.read(key: 'username');
+    final userId = await _storage.read(key: 'user_id');
+
+    if (mounted) {
+      if (token != null && username != null && userId != null) {
+        // 🟢 FORCE ENABLE ANALYTICS TAB
+        final user = UserProfile(
+          userId: userId,
+          username: username,
+          token: token,
+          permissions: [
+            AppModule.basicAlerts,
+            AppModule.checkPoints,
+            AppModule.locationMap,
+            AppModule.graphData, // <--- Key to showing the tab
+          ],
+        );
+        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => MainScaffold(user: user)));
+      } else {
+        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const LoginScreen()));
+      }
+    }
   }
 
   @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
+  void dispose() { _controller.dispose(); super.dispose(); }
 
   @override
   Widget build(BuildContext context) {
@@ -46,10 +62,7 @@ class _SplashScreenState extends State<SplashScreen>
       body: Center(
         child: ScaleTransition(
           scale: _scale,
-          child: Image.asset(
-            "assets/images/alfresa_logo.png",
-            height: 150,
-          ),
+          child: Image.asset("assets/images/alfresa_logo.png", height: 150),
         ),
       ),
     );

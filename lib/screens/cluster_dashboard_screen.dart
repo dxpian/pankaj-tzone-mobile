@@ -1,232 +1,192 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
-import '../utils/app_colors.dart';
+import 'package:provider/provider.dart';
+import '../services/sync_engine.dart';
+import '../models/app_features.dart';
 import '../models/logger_alert.dart';
-import '../models/cluster_definitions.dart';
 import 'cluster_details_page.dart';
+import 'logger_graph_screen.dart';
 
 class ClusterDashboardScreen extends StatelessWidget {
   const ClusterDashboardScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final formattedDate = DateFormat('EEEE, MMM d').format(DateTime.now());
+    final syncEngine = Provider.of<SyncEngine>(context);
+    final user = syncEngine.user;
+    final alerts = syncEngine.alerts;
+    final bool useClusters = user.hasAccess(AppModule.checkPoints);
 
-    // STATIC SAMPLE SUMMARY DATA
-    const activeLoggers = 128;
-    const inactiveLoggers = 12;
-    const emergencyLoggers = 4;
-
-    // STATIC SAMPLE ALERTS — NOW INCLUDING LAT/LNG + clusterName
-    final sampleAlerts = <LoggerAlert>[
-      LoggerAlert(
-        serial: "190123000001",
-        temperature: 11.2,
-        minutesInAlert: 14,
-        latitude: 35.8617,
-        longitude: 139.6452,
-        clusterName: "Saitama Logistic Center",
-      ),
-      LoggerAlert(
-        serial: "190123000011",
-        temperature: 9.0,
-        minutesInAlert: 6,
-        latitude: 35.7081,
-        longitude: 139.6625,
-        clusterName: "Suginami Branch",
-      ),
-      LoggerAlert(
-        serial: "190123000150",
-        temperature: 12.5,
-        minutesInAlert: 26,
-        latitude: 35.7128,
-        longitude: 139.7310,
-        clusterName: "Bunkyo Pharmaceutical Center",
-      ),
-    ];
-
-    // FILTER SAMPLE ALERTS → cluster groups
-    final clustersWithAlerts = <Map<String, dynamic>>[];
-    for (var cluster in clusters) {
-      final alerts = sampleAlerts
-          .where((a) => cluster.loggers.contains(a.serial))
-          .toList();
-      if (alerts.isNotEmpty) {
-        clustersWithAlerts.add({
-          "name": cluster.name,
-          "alerts": alerts,
-        });
+    String lastUpdateStr = "";
+    if (alerts.isNotEmpty) {
+      try {
+        lastUpdateStr = alerts.first.lastUpdated.split(' ')[1];
+      } catch (e) {
+        lastUpdateStr = "Just now";
       }
     }
 
     return Scaffold(
       backgroundColor: Colors.white,
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(children: [
-                Image.asset('assets/images/alfresa_logo.png', height: 36),
-              ]),
-              const SizedBox(height: 18),
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        title: Image.asset('assets/images/alfresa_logo.png', height: 32),
+        centerTitle: false,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh, color: Colors.grey),
+            onPressed: () => syncEngine.syncData(),
+          )
+        ],
+      ),
+      body: Column(
+        children: [
+          if (syncEngine.isLoading && alerts.isNotEmpty)
+            const LinearProgressIndicator(minHeight: 3, backgroundColor: Colors.transparent),
 
-              const Text("Welcome back, Subhanshu.",
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600)),
-              Text(formattedDate,
-                  style: const TextStyle(fontSize: 14, color: Colors.grey)),
-              const SizedBox(height: 18),
-
-              Row(
-                children: [
-                  _statBox("Active Loggers", activeLoggers, Colors.green.shade600),
-                  const SizedBox(width: 10),
-                  _statBox("Inactive", inactiveLoggers, Colors.grey.shade600),
-                  const SizedBox(width: 10),
-                  _statBox("Emergency", emergencyLoggers, Colors.red.shade700),
-                ],
-              ),
-
-              const SizedBox(height: 18),
-
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(14),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.10),
-                      blurRadius: 8,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: const Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text("Total Loggers (Nationwide)",
-                        style: TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.bold)),
-                    SizedBox(height: 10),
-                    Text("Total: 256"),
-                    Text("Min Temp: -42.5°C"),
-                    Text("Max Temp: 12.6°C"),
-                    Text("Avg Temp: 4.8°C"),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 18),
-              const Text("Cluster Alerts",
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-              const SizedBox(height: 10),
-
-              Expanded(
-                child: GridView.builder(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  gridDelegate:
-                      const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3,
-                    mainAxisSpacing: 10,
-                    crossAxisSpacing: 10,
-                    childAspectRatio: 0.95,
-                  ),
-                  itemCount: clustersWithAlerts.length,
-                  itemBuilder: (context, index) {
-                    final cluster = clustersWithAlerts[index];
-                    final alerts = cluster["alerts"] as List<LoggerAlert>;
-
-                    return GestureDetector(
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => ClusterDetailsPage(
-                              clusterName: cluster["name"],
-                              alerts: alerts,
-                            ),
-                          ),
-                        );
-                      },
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFFF2F2),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                              color: const Color(0xFFFFC1C1), width: 1),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.05),
-                              blurRadius: 4,
-                              offset: const Offset(0, 3),
-                            ),
-                          ],
-                        ),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 8),
-                        child: Column(
+          Expanded(
+            child: (syncEngine.isLoading && alerts.isEmpty)
+                ? const Center(child: CircularProgressIndicator()) 
+                : Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text(cluster["name"],
-                                textAlign: TextAlign.center,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.w600, fontSize: 11)),
-
-                            Column(
-                              children: [
-                                Text("${alerts.length}",
-                                    style: const TextStyle(
-                                        color: Colors.red,
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 20)),
-                                const SizedBox(height: 2),
-                                const Text("Alerts",
-                                    style: TextStyle(
-                                        color: Colors.red,
-                                        fontWeight: FontWeight.w600,
-                                        fontSize: 12)),
-                              ],
-                            ),
+                            Text("Welcome, ${user.username}",
+                                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                            if (lastUpdateStr.isNotEmpty)
+                              Text("Updated: $lastUpdateStr", 
+                                style: TextStyle(color: Colors.grey.shade400, fontSize: 12)),
                           ],
                         ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
+                        const SizedBox(height: 10),
+                        
+                        _buildSummaryRow(alerts),
+                        const SizedBox(height: 20),
+
+                        Text(useClusters ? "Cluster Status" : "All Loggers",
+                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+                        const SizedBox(height: 10),
+
+                        Expanded(
+                          child: useClusters
+                              ? _buildClusterGrid(context, alerts, user)
+                              : _buildFlatList(context, alerts, user),
+                        ),
+                      ],
+                    ),
+                  ),
           ),
-        ),
+        ],
       ),
+    );
+  }
+
+  Widget _buildSummaryRow(List<LoggerAlert> alerts) {
+    int emergency = alerts.where((a) => a.minutesInAlert > 0).length;
+    int active = alerts.length;
+    
+    return Row(
+      children: [
+        _statBox("Monitoring", active, Colors.green),
+        const SizedBox(width: 10),
+        _statBox("Alerts", emergency, Colors.red),
+      ],
     );
   }
 
   Widget _statBox(String label, int count, Color color) {
     return Expanded(
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.08),
-          borderRadius: BorderRadius.circular(12),
+          color: color.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(10),
         ),
         child: Column(
           children: [
-            Text(label, textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 12)),
-            const SizedBox(height: 4),
-            Text("$count",
-                style: TextStyle(
-                    color: color,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 20)),
+            Text(label, style: const TextStyle(fontSize: 12)),
+            Text("$count", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: color)),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildClusterGrid(BuildContext context, List<LoggerAlert> alerts, UserProfile user) {
+    final Map<String, List<LoggerAlert>> groups = {};
+    for (var a in alerts) {
+      if (!groups.containsKey(a.clusterName)) groups[a.clusterName] = [];
+      groups[a.clusterName]!.add(a);
+    }
+    final keys = groups.keys.toList();
+
+    return GridView.builder(
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2, crossAxisSpacing: 10, mainAxisSpacing: 10, childAspectRatio: 1.2),
+      itemCount: keys.length,
+      itemBuilder: (ctx, i) {
+        final name = keys[i];
+        final clusterAlerts = groups[name]!;
+        final alertCount = clusterAlerts.where((a) => a.minutesInAlert > 0).length;
+
+        return InkWell(
+          onTap: () {
+            Navigator.push(context, MaterialPageRoute(
+              builder: (_) => ClusterDetailsPage(
+                clusterName: name, 
+                alerts: clusterAlerts,
+                user: user, 
+              )
+            ));
+          },
+          child: Container(
+            decoration: BoxDecoration(
+              color: alertCount > 0 ? Colors.red.shade50 : Colors.white,
+              border: Border.all(color: alertCount > 0 ? Colors.red.shade200 : Colors.grey.shade300),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(name, style: const TextStyle(fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+                const SizedBox(height: 5),
+                Text("$alertCount Issues", style: TextStyle(color: alertCount > 0 ? Colors.red : Colors.grey)),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildFlatList(BuildContext context, List<LoggerAlert> alerts, UserProfile user) {
+    return ListView.builder(
+      itemCount: alerts.length,
+      itemBuilder: (ctx, i) {
+        final alert = alerts[i];
+        final isAlert = alert.minutesInAlert > 0;
+        return Card(
+          child: ListTile(
+            leading: Icon(Icons.thermostat, color: isAlert ? Colors.red : Colors.green),
+            title: Text("Logger: ${alert.serial}"),
+            // 🟢 UPDATED UI: "Probe: X | Amb: Y"
+            subtitle: Text("Probe: ${alert.temperature}°C | Amb: ${alert.ambientTemp}°C"),
+            trailing: isAlert ? const Icon(Icons.warning, color: Colors.red) : null,
+            onTap: () {
+              Navigator.push(context, MaterialPageRoute(
+                builder: (_) => LoggerGraphScreen(
+                  logger: alert, 
+                  user: user,
+                )
+              ));
+            },
+          ),
+        );
+      },
     );
   }
 }

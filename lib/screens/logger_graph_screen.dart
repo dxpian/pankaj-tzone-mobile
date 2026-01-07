@@ -1,262 +1,213 @@
-import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:fl_chart/fl_chart.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/logger_alert.dart';
+import '../models/app_features.dart';
+import '../services/history_service.dart'; 
 
-class LoggerGraphScreen extends StatelessWidget {
+class LoggerGraphScreen extends StatefulWidget {
   final LoggerAlert logger;
+  final UserProfile user; 
 
   const LoggerGraphScreen({
-    super.key,
-    required this.logger,
+    super.key, 
+    required this.logger, 
+    required this.user 
   });
 
-  Color getSeverityColor(int minutes) {
-    if (minutes >= 20) return Colors.red;
-    if (minutes >= 10) return Colors.orange;
-    return Colors.yellow.shade700;
+  @override
+  State<LoggerGraphScreen> createState() => _LoggerGraphScreenState();
+}
+
+class _LoggerGraphScreenState extends State<LoggerGraphScreen> {
+  bool _isLoading = true;
+  List<FlSpot> _spots = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchGraphData();
   }
 
-  String getSeverityLabel(int minutes) {
-    if (minutes >= 20) return "High Severity";
-    if (minutes >= 10) return "Medium Severity";
-    return "Low Severity";
+  Future<void> _fetchGraphData() async {
+    final historyService = HistoryService(widget.user.token);
+    final history = await historyService.getTemperatureHistory(widget.logger.serial);
+
+    if (mounted) {
+      setState(() {
+        _spots = [];
+        
+        for (var entry in history) {
+          // 🟢 GRAPH LOGIC: Prefer Probe (tempexternal) to match Alerts
+          double val = 0.0;
+          if (entry['tempexternal'] != null) {
+            val = (entry['tempexternal'] as num).toDouble();
+          } else if (entry['temperature'] != null) {
+            val = (entry['temperature'] as num).toDouble();
+          } else if (entry['temp'] != null) {
+            val = (entry['temp'] as num).toDouble();
+          }
+
+          // Parse Time
+          double timestamp = 0;
+          if (entry['servertime'] != null) {
+            try {
+              String rawTime = entry['servertime'].toString().replaceAll('/', '-'); 
+              DateTime dt = DateTime.parse(rawTime);
+              timestamp = dt.millisecondsSinceEpoch.toDouble();
+            } catch (e) {
+              print("Date Parse Error: $e");
+            }
+          }
+
+          if (timestamp > 0) {
+            _spots.add(FlSpot(timestamp, val));
+          }
+        }
+
+        _spots.sort((a, b) => a.x.compareTo(b.x));
+        _isLoading = false;
+      });
+    }
+  }
+
+  void _showSettingsDialog() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String serial = widget.logger.serial;
+    
+    bool isEnabled = prefs.getBool('alert_enabled_$serial') ?? false;
+    double minTemp = prefs.getDouble('alert_min_$serial') ?? 2.0;
+    double maxTemp = prefs.getDouble('alert_max_$serial') ?? 8.0;
+
+    final minController = TextEditingController(text: minTemp.toString());
+    final maxController = TextEditingController(text: maxTemp.toString());
+
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        bool localEnabled = isEnabled;
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text("Configure Alerts"),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SwitchListTile(
+                    title: const Text("Enable Probe Alert"),
+                    value: localEnabled,
+                    activeColor: Colors.red,
+                    onChanged: (v) => setDialogState(() => localEnabled = v),
+                  ),
+                  const SizedBox(height: 10),
+                  const Text("Alerts trigger on Probe Temp only.", style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: minController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: "Min Temperature (°C)", border: OutlineInputBorder()),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: maxController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: "Max Temperature (°C)", border: OutlineInputBorder()),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade800),
+                  onPressed: () async {
+                    await prefs.setBool('alert_enabled_$serial', localEnabled);
+                    await prefs.setDouble('alert_min_$serial', double.tryParse(minController.text) ?? 2.0);
+                    await prefs.setDouble('alert_max_$serial', double.tryParse(maxController.text) ?? 8.0);
+                    if (context.mounted) Navigator.pop(context);
+                    
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text("Alert settings saved locally.")),
+                    );
+                  },
+                  child: const Text("Save"),
+                )
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final Color severityColor = getSeverityColor(logger.minutesInAlert);
-    final String severityLabel = getSeverityLabel(logger.minutesInAlert);
-
-    // Simulate 2–3 hours of data (e.g. 60 points)
-    final List<Offset> points = _generateSimulatedPoints(
-      baseTemp: logger.temperature,
-      severityColor: severityColor,
-    );
-
     return Scaffold(
       appBar: AppBar(
-        title: Text("Logger ${logger.serial}"),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black87,
-        elevation: 0.5,
+        title: Text("Logger ${widget.logger.serial}"),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings),
+            onPressed: _showSettingsDialog,
+          )
+        ],
       ),
-      backgroundColor: const Color(0xFFF5F5F5),
-      body: Padding(
-        padding: const EdgeInsets.all(14.0),
+      body: SingleChildScrollView(
         child: Column(
           children: [
-            // TOP SUMMARY CARD
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(14),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.06),
-                    blurRadius: 8,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          "Logger ID",
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey,
-                          ),
-                        ),
-                        Text(
-                          logger.serial,
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        const Text(
-                          "Location",
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey,
-                          ),
-                        ),
-                        const Text(
-                          "Same as cluster (from API later)",
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: severityColor.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: severityColor, width: 1),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.warning, size: 18, color: severityColor),
-                        const SizedBox(width: 6),
-                        Text(
-                          severityLabel,
-                          style: TextStyle(
-                            color: severityColor,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 16),
-
-            // GRAPH CARD
-            Expanded(
-              child: Container(
-                width: double.infinity,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(14),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.06),
-                      blurRadius: 8,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Graph header
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text(
-                          "Last 3 hours – Temperature",
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        Text(
-                          "${logger.temperature.toStringAsFixed(1)}°C now",
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: severityColor,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      "Simulated data (API integration later)",
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Colors.grey,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Animated graph
-                    Expanded(
-                      child: TweenAnimationBuilder<double>(
-                        tween: Tween(begin: 0, end: 1),
-                        duration: const Duration(milliseconds: 700),
-                        curve: Curves.easeOutCubic,
-                        builder: (context, value, child) {
-                          return ClipRRect(
-                            borderRadius: BorderRadius.circular(12),
-                            child: CustomPaint(
-                              painter: _TemperatureGraphPainter(
-                                points: points,
-                                severityColor: severityColor,
-                                progress: value,
+            _buildInfoCards(),
+            
+            const Divider(),
+            _buildEnvironmentGrid(),
+            const Divider(),
+            
+            SizedBox(
+              height: 400,
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _spots.isEmpty
+                      ? const Center(child: Text("No Data Available"))
+                      : Padding(
+                          padding: const EdgeInsets.only(right: 20, top: 20, bottom: 20, left: 10),
+                          child: LineChart(
+                            LineChartData(
+                              gridData: const FlGridData(show: true),
+                              titlesData: FlTitlesData(
+                                topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                                rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                                bottomTitles: AxisTitles(
+                                  sideTitles: SideTitles(
+                                    showTitles: true,
+                                    reservedSize: 30,
+                                    // 🟢 CHANGED: Set Interval to 4 Hours (in milliseconds)
+                                    // 4 * 60 * 60 * 1000 = 14,400,000
+                                    interval: 14400000, 
+                                    getTitlesWidget: (value, meta) {
+                                      final date = DateTime.fromMillisecondsSinceEpoch(value.toInt());
+                                      final text = "${date.hour.toString().padLeft(2,'0')}:${date.minute.toString().padLeft(2,'0')}";
+                                      return Padding(
+                                        padding: const EdgeInsets.only(top: 8.0),
+                                        child: Text(text, style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
+                                      );
+                                    },
+                                  ),
+                                ),
                               ),
-                              child: Container(),
+                              borderData: FlBorderData(show: true, border: Border.all(color: Colors.grey.shade300)),
+                              lineBarsData: [
+                                LineChartBarData(
+                                  spots: _spots,
+                                  isCurved: true,
+                                  color: Colors.blue,
+                                  barWidth: 3,
+                                  dotData: const FlDotData(show: false),
+                                  belowBarData: BarAreaData(show: true, color: Colors.blue.withOpacity(0.1)),
+                                ),
+                              ],
                             ),
-                          );
-                        },
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-
-                    // X-axis labels (simple)
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: const [
-                        Text("−3h",
-                            style:
-                                TextStyle(fontSize: 11, color: Colors.grey)),
-                        Text("−2h",
-                            style:
-                                TextStyle(fontSize: 11, color: Colors.grey)),
-                        Text("−1h",
-                            style:
-                                TextStyle(fontSize: 11, color: Colors.grey)),
-                        Text("Now",
-                            style:
-                                TextStyle(fontSize: 11, color: Colors.grey)),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-            const SizedBox(height: 14),
-
-            // BOTTOM SUMMARY ROWS
-            Row(
-              children: [
-                _infoTile(
-                  title: "Current Temp",
-                  value: "${logger.temperature.toStringAsFixed(1)}°C",
-                  color: severityColor,
-                ),
-                const SizedBox(width: 12),
-                _infoTile(
-                  title: "In Alert",
-                  value: "${logger.minutesInAlert} min",
-                  color: severityColor,
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                _infoTile(
-                  title: "Battery",
-                  value: "Good",
-                  color: Colors.green.shade700,
-                ),
-                const SizedBox(width: 12),
-                _infoTile(
-                  title: "Last Updated",
-                  value: "Just now",
-                  color: Colors.blue.shade700,
-                ),
-              ],
+                          ),
+                        ),
             ),
           ],
         ),
@@ -264,43 +215,70 @@ class LoggerGraphScreen extends StatelessWidget {
     );
   }
 
-  // small bottom tiles
-  Widget _infoTile({
-    required String title,
-    required String value,
-    required Color color,
-  }) {
+  Widget _buildInfoCards() {
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Row(
+        children: [
+          // 🟢 KEEPING PROBE & AMBIENT VISIBLE
+          _infoCard("Probe Temp", "${widget.logger.temperature}°C", Icons.thermostat, Colors.redAccent),
+          const SizedBox(width: 10),
+          _infoCard("Ambient Temp", "${widget.logger.ambientTemp}°C", Icons.cloud, Colors.blueGrey),
+          const SizedBox(width: 10),
+          _infoCard("Battery", "${widget.logger.battery.toInt()}%", Icons.battery_full, Colors.green),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEnvironmentGrid() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text("Environment Status", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              _envCard("Humidity", "${widget.logger.humidity}%", Icons.water_drop, Colors.blueAccent),
+              const SizedBox(width: 10),
+              _envCard("Light", "${widget.logger.light.toInt()} Lux", Icons.wb_sunny, Colors.orangeAccent),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              _envCard("Vibration", "${widget.logger.vibration.toInt()}", Icons.vibration, Colors.purple),
+              const SizedBox(width: 10),
+              _envCard("Location", widget.logger.city, Icons.location_city, Colors.grey),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _envCard(String title, String val, IconData icon, Color color) {
     return Expanded(
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 6,
-              offset: const Offset(0, 3),
-            ),
-          ],
+          color: color.withOpacity(0.05),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: color.withOpacity(0.2)),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Row(
           children: [
-            Text(
-              title,
-              style: const TextStyle(
-                  fontSize: 11,
-                  color: Colors.grey,
-                  fontWeight: FontWeight.w500),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              value,
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                color: color,
+            Icon(icon, size: 20, color: color),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                  Text(val, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14), overflow: TextOverflow.ellipsis),
+                ],
               ),
             ),
           ],
@@ -309,110 +287,23 @@ class LoggerGraphScreen extends StatelessWidget {
     );
   }
 
-  // Generate smooth-ish series around base temperature
-  List<Offset> _generateSimulatedPoints({
-    required double baseTemp,
-    required Color severityColor,
-  }) {
-    final rand = Random();
-    const int count = 60; // 60 points over ~3h
-    final List<Offset> pts = [];
-    final double amplitude = 0.5 + (severityColor == Colors.red
-        ? 1.0
-        : (severityColor == Colors.orange ? 0.7 : 0.4));
-
-    for (int i = 0; i < count; i++) {
-      final t = i / (count - 1);
-      final wave = sin(t * pi * 4); // 2 cycles
-      final noise = (rand.nextDouble() - 0.5) * 0.3;
-      final temp = baseTemp + wave * amplitude + noise;
-
-      pts.add(Offset(t, temp));
-    }
-    return pts;
-  }
-}
-
-class _TemperatureGraphPainter extends CustomPainter {
-  final List<Offset> points;
-  final Color severityColor;
-  final double progress; // 0..1 for animation
-
-  _TemperatureGraphPainter({
-    required this.points,
-    required this.severityColor,
-    required this.progress,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (points.isEmpty) return;
-
-    // Map logical points (0..1, temp) to canvas coords
-    final temps = points.map((e) => e.dy).toList();
-    final minT = temps.reduce(min);
-    final maxT = temps.reduce(max);
-    final double padding = 10;
-
-    Offset mapPoint(Offset p) {
-      final x = padding + p.dx * (size.width - 2 * padding);
-      final normT =
-          (p.dy - minT) / ((maxT - minT).abs() < 0.001 ? 1 : (maxT - minT));
-      final y =
-          size.height - padding - normT * (size.height - 2 * padding);
-      return Offset(x, y);
-    }
-
-    final path = Path();
-    final fillPath = Path();
-
-    for (int i = 0; i < (points.length * progress).clamp(2, points.length).toInt(); i++) {
-      final p = mapPoint(points[i]);
-      if (i == 0) {
-        path.moveTo(p.dx, p.dy);
-        fillPath.moveTo(p.dx, size.height - padding);
-        fillPath.lineTo(p.dx, p.dy);
-      } else {
-        path.lineTo(p.dx, p.dy);
-        fillPath.lineTo(p.dx, p.dy);
-      }
-    }
-
-    // Close fill to bottom
-    final lastX = mapPoint(points[
-            (points.length * progress).clamp(1, points.length).toInt() - 1])
-        .dx;
-    fillPath.lineTo(lastX, size.height - padding);
-    fillPath.close();
-
-    // Gradient under the line
-    final Paint fillPaint = Paint()
-      ..style = PaintingStyle.fill
-      ..shader = LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-        colors: [
-          severityColor.withOpacity(0.35),
-          severityColor.withOpacity(0.02),
-        ],
-      ).createShader(
-        Rect.fromLTWH(0, 0, size.width, size.height),
-      );
-
-    // Line paint
-    final Paint linePaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.5
-      ..color = severityColor;
-
-    canvas.drawPath(fillPath, fillPaint);
-    canvas.drawPath(path, linePaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _TemperatureGraphPainter oldDelegate) {
-    return oldDelegate.points != points ||
-        oldDelegate.severityColor != severityColor ||
-        oldDelegate.progress != progress;
+  Widget _infoCard(String label, String value, IconData icon, Color color) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: color),
+            const SizedBox(height: 5),
+            Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+            Text(value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          ],
+        ),
+      ),
+    );
   }
 }
