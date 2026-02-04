@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/logger_alert.dart';
 import '../models/app_features.dart';
-import '../services/history_service.dart'; 
+import '../services/history_service.dart';
+import '../widgets/logger_settings_dialog.dart'; 
 
 class LoggerGraphScreen extends StatefulWidget {
   final LoggerAlert logger;
@@ -22,192 +24,153 @@ class LoggerGraphScreen extends StatefulWidget {
 class _LoggerGraphScreenState extends State<LoggerGraphScreen> {
   bool _isLoading = true;
   List<FlSpot> _spots = [];
+  
+  // Alert Thresholds
+  double _minTempLimit = 2.0; 
+  double _maxTempLimit = 8.0;
+  bool _enableTempAlert = true;
+  
+  // Battery Thresholds
+  double _batteryMinLimit = 20.0;
+  bool _enableBattAlert = false;
+
+  // Display Preferences
+  late bool _showAmbient;
+  late bool _showHumidity;
+  late bool _showLight;
+  late bool _showVibration;
+  late bool _showLocation;
 
   @override
   void initState() {
     super.initState();
+    _showAmbient = widget.logger.showAmbient;
+    _showHumidity = widget.logger.showHumidity;
+    _showLight = widget.logger.showLight;
+    _showVibration = widget.logger.showVibration;
+    _showLocation = widget.logger.showLocation;
     _fetchGraphData();
   }
 
   Future<void> _fetchGraphData() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String serial = widget.logger.serial;
+    
+    if (mounted) {
+      setState(() {
+        // Load Temp Settings
+        _minTempLimit = prefs.getDouble('alert_min_$serial') ?? 2.0;
+        _maxTempLimit = prefs.getDouble('alert_max_$serial') ?? 8.0;
+        _enableTempAlert = prefs.getBool('alert_enabled_$serial') ?? false;
+        
+        // Load Battery Settings
+        _batteryMinLimit = prefs.getDouble('batt_min_$serial') ?? 20.0;
+        _enableBattAlert = prefs.getBool('batt_enabled_$serial') ?? false;
+        
+        // Load Display Preferences
+        _showAmbient = prefs.getBool('show_ambient_$serial') ?? widget.logger.showAmbient;
+        _showHumidity = prefs.getBool('show_humidity_$serial') ?? widget.logger.showHumidity;
+        _showLight = prefs.getBool('show_light_$serial') ?? widget.logger.showLight;
+        _showVibration = prefs.getBool('show_vibration_$serial') ?? widget.logger.showVibration;
+        _showLocation = prefs.getBool('show_location_$serial') ?? widget.logger.showLocation;
+      });
+    }
+
     final historyService = HistoryService(widget.user.token);
     final history = await historyService.getTemperatureHistory(widget.logger.serial);
 
     if (mounted) {
       setState(() {
         _spots = [];
-        
         for (var entry in history) {
-          // 🟢 GRAPH LOGIC: Prefer Probe (tempexternal) to match Alerts
           double val = 0.0;
-          if (entry['tempexternal'] != null) {
-            val = (entry['tempexternal'] as num).toDouble();
-          } else if (entry['temperature'] != null) {
-            val = (entry['temperature'] as num).toDouble();
-          } else if (entry['temp'] != null) {
-            val = (entry['temp'] as num).toDouble();
-          }
+          bool hasVal = false;
 
-          // Parse Time
-          double timestamp = 0;
-          if (entry['servertime'] != null) {
-            try {
-              String rawTime = entry['servertime'].toString().replaceAll('/', '-'); 
-              DateTime dt = DateTime.parse(rawTime);
-              timestamp = dt.millisecondsSinceEpoch.toDouble();
-            } catch (e) {
-              print("Date Parse Error: $e");
+          if (widget.logger.isProbeActive) {
+            if (entry['tempexternal'] != null) {
+              val = (entry['tempexternal'] as num).toDouble();
+              hasVal = true;
+            }
+          }
+          if (!hasVal) {
+             if (entry['temperature'] != null) {
+              val = (entry['temperature'] as num).toDouble();
+              hasVal = true;
+            } else if (entry['temp'] != null) {
+              val = (entry['temp'] as num).toDouble();
+              hasVal = true;
             }
           }
 
-          if (timestamp > 0) {
-            _spots.add(FlSpot(timestamp, val));
+          if (hasVal) {
+            double timestamp = 0;
+            if (entry['servertime'] != null) {
+              try {
+                String rawTime = entry['servertime'].toString().replaceAll('/', '-'); 
+                DateTime dt = DateTime.parse(rawTime);
+                timestamp = dt.millisecondsSinceEpoch.toDouble();
+              } catch (e) {
+                print("Date Parse Error: $e");
+              }
+            }
+            if (timestamp > 0) {
+              _spots.add(FlSpot(timestamp, val));
+            }
           }
         }
-
         _spots.sort((a, b) => a.x.compareTo(b.x));
         _isLoading = false;
       });
     }
   }
 
-  void _showSettingsDialog() async {
-    final prefs = await SharedPreferences.getInstance();
-    final String serial = widget.logger.serial;
-    
-    bool isEnabled = prefs.getBool('alert_enabled_$serial') ?? false;
-    double minTemp = prefs.getDouble('alert_min_$serial') ?? 2.0;
-    double maxTemp = prefs.getDouble('alert_max_$serial') ?? 8.0;
-
-    final minController = TextEditingController(text: minTemp.toString());
-    final maxController = TextEditingController(text: maxTemp.toString());
-
-    if (!mounted) return;
-
-    showDialog(
+  void _openSettings() async {
+    final bool? shouldRefresh = await showDialog(
       context: context,
-      builder: (ctx) {
-        bool localEnabled = isEnabled;
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              title: const Text("Configure Alerts"),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  SwitchListTile(
-                    title: const Text("Enable Probe Alert"),
-                    value: localEnabled,
-                    activeColor: Colors.red,
-                    onChanged: (v) => setDialogState(() => localEnabled = v),
-                  ),
-                  const SizedBox(height: 10),
-                  const Text("Alerts trigger on Probe Temp only.", style: TextStyle(fontSize: 12, color: Colors.grey)),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: minController,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: "Min Temperature (°C)", border: OutlineInputBorder()),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: maxController,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: "Max Temperature (°C)", border: OutlineInputBorder()),
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade800),
-                  onPressed: () async {
-                    await prefs.setBool('alert_enabled_$serial', localEnabled);
-                    await prefs.setDouble('alert_min_$serial', double.tryParse(minController.text) ?? 2.0);
-                    await prefs.setDouble('alert_max_$serial', double.tryParse(maxController.text) ?? 8.0);
-                    if (context.mounted) Navigator.pop(context);
-                    
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text("Alert settings saved locally.")),
-                    );
-                  },
-                  child: const Text("Save"),
-                )
-              ],
-            );
-          },
-        );
-      },
+      builder: (_) => LoggerSettingsDialog(serial: widget.logger.serial),
     );
+
+    if (shouldRefresh == true) {
+      _fetchGraphData();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Configuration updated")),
+        );
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.white,
       appBar: AppBar(
-        title: Text("Logger ${widget.logger.serial}"),
+        title: Text("Logger ${widget.logger.serial}", style: const TextStyle(color: Colors.black)),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.black),
         actions: [
           IconButton(
             icon: const Icon(Icons.settings),
-            onPressed: _showSettingsDialog,
+            onPressed: _openSettings, 
           )
         ],
       ),
       body: SingleChildScrollView(
         child: Column(
           children: [
-            _buildInfoCards(),
-            
+            // Note: We move _buildInfoCards here to ensure it rebuilds with state
+            _buildInfoCards(), 
             const Divider(),
             _buildEnvironmentGrid(),
             const Divider(),
-            
             SizedBox(
               height: 400,
               child: _isLoading
-                  ? const Center(child: CircularProgressIndicator())
+                  ? _buildSkeletonGraph()
                   : _spots.isEmpty
                       ? const Center(child: Text("No Data Available"))
-                      : Padding(
-                          padding: const EdgeInsets.only(right: 20, top: 20, bottom: 20, left: 10),
-                          child: LineChart(
-                            LineChartData(
-                              gridData: const FlGridData(show: true),
-                              titlesData: FlTitlesData(
-                                topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                                rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                                bottomTitles: AxisTitles(
-                                  sideTitles: SideTitles(
-                                    showTitles: true,
-                                    reservedSize: 30,
-                                    // 🟢 CHANGED: Set Interval to 4 Hours (in milliseconds)
-                                    // 4 * 60 * 60 * 1000 = 14,400,000
-                                    interval: 14400000, 
-                                    getTitlesWidget: (value, meta) {
-                                      final date = DateTime.fromMillisecondsSinceEpoch(value.toInt());
-                                      final text = "${date.hour.toString().padLeft(2,'0')}:${date.minute.toString().padLeft(2,'0')}";
-                                      return Padding(
-                                        padding: const EdgeInsets.only(top: 8.0),
-                                        child: Text(text, style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
-                                      );
-                                    },
-                                  ),
-                                ),
-                              ),
-                              borderData: FlBorderData(show: true, border: Border.all(color: Colors.grey.shade300)),
-                              lineBarsData: [
-                                LineChartBarData(
-                                  spots: _spots,
-                                  isCurved: true,
-                                  color: Colors.blue,
-                                  barWidth: 3,
-                                  dotData: const FlDotData(show: false),
-                                  belowBarData: BarAreaData(show: true, color: Colors.blue.withOpacity(0.1)),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
+                      : _buildGraph(), 
             ),
           ],
         ),
@@ -215,23 +178,213 @@ class _LoggerGraphScreenState extends State<LoggerGraphScreen> {
     );
   }
 
+  Widget _buildGraph() {
+    return Padding(
+      padding: const EdgeInsets.only(right: 20, top: 20, bottom: 20, left: 10),
+      child: TweenAnimationBuilder<double>(
+        tween: Tween(begin: 0.0, end: 1.0),
+        duration: const Duration(milliseconds: 2000), 
+        curve: Curves.easeOutCubic,
+        builder: (context, value, child) {
+          int limit = (_spots.length * value).toInt();
+          List<FlSpot> animatedSpots = _spots.sublist(0, limit);
+          if (animatedSpots.isEmpty) return Container();
+
+          return LineChart(
+            LineChartData(
+              lineTouchData: LineTouchData(
+                touchTooltipData: LineTouchTooltipData(
+                  getTooltipItems: (touchedSpots) {
+                    return touchedSpots.map((spot) {
+                      final date = DateTime.fromMillisecondsSinceEpoch(spot.x.toInt());
+                      final timeStr = "${date.hour}:${date.minute.toString().padLeft(2,'0')}";
+                      return LineTooltipItem(
+                        "$timeStr \n${spot.y.toStringAsFixed(1)}°C",
+                        const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                      );
+                    }).toList();
+                  },
+                ),
+                handleBuiltInTouches: true,
+              ),
+              gridData: FlGridData(
+                show: true,
+                drawVerticalLine: false,
+                horizontalInterval: 1, 
+                getDrawingHorizontalLine: (value) => FlLine(color: Colors.grey.shade100, strokeWidth: 1),
+              ),
+              titlesData: FlTitlesData(
+                topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                bottomTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    reservedSize: 30,
+                    interval: 14400000, 
+                    getTitlesWidget: (value, meta) {
+                      final date = DateTime.fromMillisecondsSinceEpoch(value.toInt());
+                      final text = "${date.hour.toString().padLeft(2,'0')}:${date.minute.toString().padLeft(2,'0')}";
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 8.0),
+                        child: Text(text, style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
+                      );
+                    },
+                  ),
+                ),
+              ),
+              borderData: FlBorderData(show: false),
+              
+              extraLinesData: ExtraLinesData(
+                horizontalLines: [
+                  HorizontalLine(
+                    y: _maxTempLimit,
+                    color: Colors.red.withOpacity(0.8),
+                    strokeWidth: 2,
+                    dashArray: [5, 5], 
+                    label: HorizontalLineLabel(show: true, labelResolver: (line) => "Max ${_maxTempLimit}°C", style: const TextStyle(color: Colors.red, fontSize: 10, fontWeight: FontWeight.bold)),
+                  ),
+                  HorizontalLine(
+                    y: _minTempLimit,
+                    color: Colors.blue.withOpacity(0.8),
+                    strokeWidth: 2,
+                    dashArray: [5, 5], 
+                    label: HorizontalLineLabel(show: true, labelResolver: (line) => "Min ${_minTempLimit}°C", style: const TextStyle(color: Colors.blue, fontSize: 10, fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
+
+              lineBarsData: [
+                LineChartBarData(
+                  spots: animatedSpots,
+                  isCurved: true,
+                  color: Colors.blue.shade700,
+                  barWidth: 3,
+                  dotData: const FlDotData(show: false),
+                  belowBarData: BarAreaData(
+                    show: true,
+                    gradient: LinearGradient(
+                      colors: [
+                        Colors.blue.withOpacity(0.3),
+                        Colors.blue.withOpacity(0.0),
+                      ],
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildSkeletonGraph() {
+    return Padding(
+      padding: const EdgeInsets.all(20),
+      child: Container(
+        width: double.infinity,
+        decoration: BoxDecoration(
+          color: Colors.grey.shade100,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.show_chart, size: 50, color: Colors.grey.shade300),
+              const SizedBox(height: 10),
+              Text("Loading Data...", style: TextStyle(color: Colors.grey.shade400)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildInfoCards() {
+    // 1. Calculate Temperature Color
+    // If we have an alert enabled AND temp is out of bounds -> Red. Else Green.
+    Color tempColor = Colors.green;
+    IconData tempIcon = widget.logger.isProbeActive ? Icons.thermostat : Icons.cloud;
+    
+    bool isTempViolation = false;
+    if (_enableTempAlert) {
+      if (widget.logger.temperature > _maxTempLimit || widget.logger.temperature < _minTempLimit) {
+        isTempViolation = true;
+      }
+    }
+    if (isTempViolation) {
+      tempColor = Colors.red;
+      tempIcon = Icons.warning_amber_rounded;
+    }
+
+    // 2. Calculate Battery Color
+    // If battery is LESS than limit -> Red. Else Green.
+    Color battColor = Colors.green;
+    IconData battIcon = Icons.battery_full;
+
+    // Logic: If battery is LOW (e.g. 62 < 80), show Red.
+    if (widget.logger.battery < _batteryMinLimit) {
+      battColor = Colors.red;
+      battIcon = Icons.battery_alert;
+    }
+
+    String mainLabel = widget.logger.isProbeActive ? "Probe Temp" : "Ambient Temp";
+
     return Padding(
       padding: const EdgeInsets.all(16.0),
       child: Row(
         children: [
-          // 🟢 KEEPING PROBE & AMBIENT VISIBLE
-          _infoCard("Probe Temp", "${widget.logger.temperature}°C", Icons.thermostat, Colors.redAccent),
+          // 🟢 Dynamic Temp Card
+          _infoCard(mainLabel, "${widget.logger.temperature}°C", tempIcon, tempColor),
+          
+          if (widget.logger.isProbeActive && _showAmbient) ...[
+            const SizedBox(width: 10),
+            _infoCard("Ambient (Sec)", "${widget.logger.ambientTemp}°C", Icons.cloud_outlined, Colors.blueGrey),
+          ],
+          
           const SizedBox(width: 10),
-          _infoCard("Ambient Temp", "${widget.logger.ambientTemp}°C", Icons.cloud, Colors.blueGrey),
-          const SizedBox(width: 10),
-          _infoCard("Battery", "${widget.logger.battery.toInt()}%", Icons.battery_full, Colors.green),
+          // 🟢 Dynamic Battery Card
+          _infoCard("Battery", "${widget.logger.battery.toInt()}%", battIcon, battColor),
         ],
       ),
     );
   }
 
   Widget _buildEnvironmentGrid() {
+    List<Widget> cards = [];
+
+    if (_showHumidity) {
+      cards.add(_envCard("Humidity", "${widget.logger.humidity}%", Icons.water_drop, Colors.blueAccent));
+    }
+    if (_showLight) {
+      cards.add(_envCard("Light", "${widget.logger.light.toInt()} Lux", Icons.wb_sunny, Colors.orangeAccent));
+    }
+    if (_showVibration) {
+      cards.add(_envCard("Vibration", "${widget.logger.vibration.toInt()}", Icons.vibration, Colors.purple));
+    }
+    if (_showLocation) {
+      cards.add(_envCard("Location", widget.logger.city, Icons.location_city, Colors.grey));
+    }
+
+    if (cards.isEmpty) return const SizedBox.shrink();
+
+    List<Widget> rows = [];
+    for (int i = 0; i < cards.length; i += 2) {
+      rows.add(
+        Row(
+          children: [
+            cards[i],
+            const SizedBox(width: 10),
+            if (i + 1 < cards.length) cards[i + 1] else const Spacer(),
+          ],
+        )
+      );
+      if (i + 2 < cards.length) rows.add(const SizedBox(height: 10));
+    }
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
       child: Column(
@@ -239,21 +392,7 @@ class _LoggerGraphScreenState extends State<LoggerGraphScreen> {
         children: [
           const Text("Environment Status", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           const SizedBox(height: 10),
-          Row(
-            children: [
-              _envCard("Humidity", "${widget.logger.humidity}%", Icons.water_drop, Colors.blueAccent),
-              const SizedBox(width: 10),
-              _envCard("Light", "${widget.logger.light.toInt()} Lux", Icons.wb_sunny, Colors.orangeAccent),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              _envCard("Vibration", "${widget.logger.vibration.toInt()}", Icons.vibration, Colors.purple),
-              const SizedBox(width: 10),
-              _envCard("Location", widget.logger.city, Icons.location_city, Colors.grey),
-            ],
-          ),
+          ...rows,
         ],
       ),
     );
