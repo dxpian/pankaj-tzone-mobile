@@ -5,7 +5,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/logger_alert.dart';
 import '../models/app_features.dart';
 import '../services/history_service.dart';
-import '../widgets/logger_settings_dialog.dart'; 
+// 🟢 CHANGED: Import the new screen instead of the dialog
+import 'logger_settings_screen.dart'; 
 
 class LoggerGraphScreen extends StatefulWidget {
   final LoggerAlert logger;
@@ -124,20 +125,17 @@ class _LoggerGraphScreenState extends State<LoggerGraphScreen> {
     }
   }
 
+  // 🟢 CHANGED: Now navigates to a new page instead of opening a dialog
   void _openSettings() async {
-    final bool? shouldRefresh = await showDialog(
-      context: context,
-      builder: (_) => LoggerSettingsDialog(serial: widget.logger.serial),
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => LoggerSettingsScreen(logger: widget.logger),
+      ),
     );
 
-    if (shouldRefresh == true) {
-      _fetchGraphData();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Configuration updated")),
-        );
-      }
-    }
+    // Refresh data when returning from settings to apply new threshold lines/colors
+    _fetchGraphData();
   }
 
   @override
@@ -159,7 +157,6 @@ class _LoggerGraphScreenState extends State<LoggerGraphScreen> {
       body: SingleChildScrollView(
         child: Column(
           children: [
-            // Note: We move _buildInfoCards here to ensure it rebuilds with state
             _buildInfoCards(), 
             const Divider(),
             _buildEnvironmentGrid(),
@@ -304,8 +301,6 @@ class _LoggerGraphScreenState extends State<LoggerGraphScreen> {
   }
 
   Widget _buildInfoCards() {
-    // 1. Calculate Temperature Color
-    // If we have an alert enabled AND temp is out of bounds -> Red. Else Green.
     Color tempColor = Colors.green;
     IconData tempIcon = widget.logger.isProbeActive ? Icons.thermostat : Icons.cloud;
     
@@ -320,12 +315,9 @@ class _LoggerGraphScreenState extends State<LoggerGraphScreen> {
       tempIcon = Icons.warning_amber_rounded;
     }
 
-    // 2. Calculate Battery Color
-    // If battery is LESS than limit -> Red. Else Green.
     Color battColor = Colors.green;
     IconData battIcon = Icons.battery_full;
 
-    // Logic: If battery is LOW (e.g. 62 < 80), show Red.
     if (widget.logger.battery < _batteryMinLimit) {
       battColor = Colors.red;
       battIcon = Icons.battery_alert;
@@ -337,7 +329,6 @@ class _LoggerGraphScreenState extends State<LoggerGraphScreen> {
       padding: const EdgeInsets.all(16.0),
       child: Row(
         children: [
-          // 🟢 Dynamic Temp Card
           _infoCard(mainLabel, "${widget.logger.temperature}°C", tempIcon, tempColor),
           
           if (widget.logger.isProbeActive && _showAmbient) ...[
@@ -346,7 +337,6 @@ class _LoggerGraphScreenState extends State<LoggerGraphScreen> {
           ],
           
           const SizedBox(width: 10),
-          // 🟢 Dynamic Battery Card
           _infoCard("Battery", "${widget.logger.battery.toInt()}%", battIcon, battColor),
         ],
       ),
