@@ -3,12 +3,15 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'models/app_features.dart';
 import 'services/sync_engine.dart';
-import 'services/notification_service.dart'; // Ensure this import is here
+import 'services/notification_service.dart';
 import 'screens/splash_screen.dart';
 import 'screens/cluster_dashboard_screen.dart';
 import 'screens/map_screen.dart';
-import 'screens/profile_screen.dart';
+import 'screens/menu_screen.dart'; 
 import 'screens/stats_screen.dart';
+
+// 🟢 NEW: Global Key to allow navigation from background services (like ApiService)
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 class MyHttpOverrides extends HttpOverrides {
   @override
@@ -20,9 +23,6 @@ class MyHttpOverrides extends HttpOverrides {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  // 🟢 1. Initialize Notification Service FIRST (The only change)
-  // This ensures permissions are checked and the system is ready before the UI loads.
   await NotificationService.init();
 
   HttpOverrides.global = MyHttpOverrides();
@@ -35,6 +35,8 @@ class AlfresaApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      // 🟢 NEW: Register the global key here
+      navigatorKey: navigatorKey,
       debugShowCheckedModeBanner: false,
       title: 'Alfresa Alert App',
       theme: ThemeData(fontFamily: 'Poppins', useMaterial3: false),
@@ -65,13 +67,12 @@ class MainScreenContent extends StatefulWidget {
 
 class _MainScreenContentState extends State<MainScreenContent> with WidgetsBindingObserver {
   int _currentIndex = 0;
-  List<Widget> _pages = []; // Initialized empty to prevent late initialization error
+  List<Widget> _pages = []; 
   List<BottomNavigationBarItem> _navItems = [];
 
   @override
   void initState() {
     super.initState();
-    // 🟢 1. LISTEN FOR WAKE-UP
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _setupModules();
@@ -84,12 +85,9 @@ class _MainScreenContentState extends State<MainScreenContent> with WidgetsBindi
     super.dispose();
   }
 
-  // 🟢 2. AUTO-REFRESH ON RESUME
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      print(">> App Woke Up: Forcing Sync...");
-      // Check if mounted to avoid errors if the widget is disposed
       if (mounted) {
         Provider.of<SyncEngine>(context, listen: false).syncData();
       }
@@ -97,7 +95,6 @@ class _MainScreenContentState extends State<MainScreenContent> with WidgetsBindi
   }
 
   void _setupModules() {
-    // Safety check: Ensure context is still valid
     if (!mounted) return;
     
     final user = Provider.of<SyncEngine>(context, listen: false).user;
@@ -105,27 +102,30 @@ class _MainScreenContentState extends State<MainScreenContent> with WidgetsBindi
       _pages = [];
       _navItems = [];
 
+      // 1. Dashboard
       _pages.add(const ClusterDashboardScreen());
       _navItems.add(const BottomNavigationBarItem(icon: Icon(Icons.dashboard), label: "Monitor"));
 
+      // 2. Map (Conditional)
       if (user.hasAccess(AppModule.locationMap)) {
         _pages.add(const MapScreen());
         _navItems.add(const BottomNavigationBarItem(icon: Icon(Icons.map), label: "Map"));
       }
 
+      // 3. Analytics (Conditional)
       if (user.hasAccess(AppModule.graphData)) {
         _pages.add(const StatsScreen());
         _navItems.add(const BottomNavigationBarItem(icon: Icon(Icons.bar_chart), label: "Analytics"));
       }
 
-      _pages.add(const ProfileScreen());
-      _navItems.add(const BottomNavigationBarItem(icon: Icon(Icons.person), label: "Profile"));
+      // 4. Menu
+      _pages.add(MenuScreen(user: user));
+      _navItems.add(const BottomNavigationBarItem(icon: Icon(Icons.menu), label: "Menu"));
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    // Show loader until pages are setup
     if (!mounted || _pages.isEmpty) return const Scaffold(body: Center(child: CircularProgressIndicator())); 
 
     return Scaffold(

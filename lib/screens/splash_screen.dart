@@ -27,22 +27,25 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
 
   Future<void> _checkSession() async {
     await Future.delayed(const Duration(seconds: 2));
+    
+    // Read all fields
     final token = await _storage.read(key: 'auth_token');
     final username = await _storage.read(key: 'username');
     final userId = await _storage.read(key: 'user_id');
+    final email = await _storage.read(key: 'email'); // 🟢 ADDED: Read Email
 
     if (mounted) {
       if (token != null && username != null && userId != null) {
-        // 🟢 FORCE ENABLE ANALYTICS TAB
         final user = UserProfile(
           userId: userId,
           username: username,
+          email: email ?? "user@alfresa.com", // 🟢 ADDED: Fallback
           token: token,
           permissions: [
             AppModule.basicAlerts,
             AppModule.checkPoints,
             AppModule.locationMap,
-            AppModule.graphData, // <--- Key to showing the tab
+            AppModule.graphData, 
           ],
         );
         Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => MainScaffold(user: user)));

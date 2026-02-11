@@ -1,9 +1,17 @@
 import 'dart:convert';
+import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import '../main.dart'; // To access navigatorKey
+import '../screens/login_screen.dart';
 
 class ApiService {
   static const String baseUrl = "https://www.ibtrace.com/tzoneserver/api"; 
   final String token;
+  
+  // 🟢 SAFETY LOCK: Prevents "Thundering Herd" of logout requests
+  static bool _isLoggingOut = false;
+
   ApiService(this.token);
 
   Map<String, String> get _headers => {
@@ -12,13 +20,20 @@ class ApiService {
       };
 
   Future<dynamic> _postRequest(String path, {Map<String, dynamic>? body}) async {
-    await Future.delayed(const Duration(milliseconds: 200));
+    // Basic check to avoid bad URLs
     if (path.contains("Unknown")) return null;
 
     final url = Uri.parse('$baseUrl$path');
     try {
       final response = await http.post(url, headers: _headers, body: jsonEncode(body ?? {}));
       
+      // 🟢 403 INTERCEPTOR: Detects Expired Token
+      if (response.statusCode == 403) {
+        print("⛔ API 403 FORBIDDEN: Token Expired.");
+        _triggerForceLogout();
+        return null;
+      }
+
       if (response.statusCode == 200) {
         return json.decode(response.body);
       } else {
@@ -30,7 +45,36 @@ class ApiService {
     return null;
   }
 
-  // 🟢 UPDATED: Returns both Probe and Ambient separately
+  // 🟢 REFINED LOGOUT LOGIC: Uses try/finally for perfect lock timing
+  void _triggerForceLogout() async {
+    if (_isLoggingOut) return; // 🛑 STOP if already logging out
+    _isLoggingOut = true; // 🔒 LOCK
+
+    print("🔒 Initiating Safe Logout Sequence...");
+
+    try {
+      const storage = FlutterSecureStorage();
+      await storage.deleteAll(); // Wipe old token
+
+      // Use the Global Key to navigate without context
+      if (navigatorKey.currentState != null) {
+        // 🟢 AWAIT the navigation so we keep the lock held until transition is done
+        await navigatorKey.currentState!.pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const LoginScreen()),
+          (route) => false,
+        );
+      }
+    } catch (e) {
+      print("Logout Navigation Error: $e");
+    } finally {
+      // 🟢 RELEASE LOCK immediately after work is done
+      _isLoggingOut = false; 
+      print("🔓 Logout Sequence Complete. Lock Released.");
+    }
+  }
+
+  // --- EXISTING LOGIC BELOW (UNTOUCHED) ---
+
   Future<Map<String, dynamic>?> getDeviceDetails(String serial) async {
     final data = await _postRequest('/v1/device/userDeviceDetailsWithSerial/$serial');
 
@@ -45,10 +89,8 @@ class ApiService {
         }
 
         return {
-          // 🟢 SPLIT LOGIC
-          'temperature': safeParse(state['tempexternal']), // Probe (Primary)
-          'ambient': safeParse(state['temperature']),      // Ambient (Secondary)
-          
+          'temperature': safeParse(state['tempexternal']), // Probe
+          'ambient': safeParse(state['temperature']),      // Ambient
           'battery': safeParse(state['battery']),
           'time': state['time']?.toString() ?? "",
           'humidity': safeParse(state['humidity']),

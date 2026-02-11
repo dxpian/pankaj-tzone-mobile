@@ -16,14 +16,12 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
   final _storage = const FlutterSecureStorage();
   
-  // controllers to capture user input
   final TextEditingController _idController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
 
   Future<void> _performLogin() async {
     final String passwordInput = _passwordController.text.trim();
 
-    // Validating password presence as per the new requirement
     if (passwordInput.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Please enter your Password")),
@@ -33,34 +31,29 @@ class _LoginScreenState extends State<LoginScreen> {
 
     setState(() => _isLoading = true);
 
+    // 🟢 DEFINE EMAIL HERE (Since it's hardcoded for now, we use a variable)
+    const String loginEmail = "pankaj@ithrue.com";
+
     try {
-      // 1. UPDATED ENDPOINT: Correct path provided by your colleague
       final url = Uri.parse("https://www.ibtrace.com/tzoneserver/api/v1/auth/login");
       
-      // 2. UPDATED BODY: Includes all required keys (email, password, username)
       final response = await http.post(
         url,
         headers: {"Content-Type": "application/json"},
         body: jsonEncode({
-          "email": "pankaj@ithrue.com",
+          "email": loginEmail, // Use the variable
           "password": passwordInput,
           "username": "Ite-admin",
           "withCredentials": true
         }),
       );
 
-      // Logging for immediate verification in your console
       print("LOGIN STATUS: ${response.statusCode}");
-      print("LOGIN RESPONSE: ${response.body}");
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         
-        // 3. CORRECT DATA EXTRACTION based on your Raw Log
-        // Token is at the top level in 'accesstoken' (lowercase)
         final String serverToken = data['accesstoken'] ?? "";
-        
-        // User details are inside the first element of the 'object' list
         String serverUserId = "Ite-admin";
         String serverName = "Admin";
         
@@ -76,6 +69,7 @@ class _LoginScreenState extends State<LoginScreen> {
         final realUser = UserProfile(
           userId: serverUserId,
           username: serverName,
+          email: loginEmail, // 🟢 ADDED: Pass the email
           token: serverToken,
           permissions: [
             AppModule.basicAlerts,
@@ -85,10 +79,11 @@ class _LoginScreenState extends State<LoginScreen> {
           ],
         );
 
-        // 4. SAVE REAL SESSION TO STORAGE
+        // 🟢 SAVE TO STORAGE
         await _storage.write(key: 'auth_token', value: realUser.token);
         await _storage.write(key: 'username', value: realUser.username);
         await _storage.write(key: 'user_id', value: realUser.userId);
+        await _storage.write(key: 'email', value: realUser.email); // Save Email
         await _storage.write(
           key: 'permissions', 
           value: UserProfile.encodePermissions(realUser.permissions)
@@ -124,7 +119,6 @@ class _LoginScreenState extends State<LoginScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // Placeholder icon for the logo
               const Icon(Icons.ac_unit, size: 60, color: Colors.blue), 
               const SizedBox(height: 40),
               const Text(

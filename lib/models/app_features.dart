@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
 
 enum AppModule {
   basicAlerts, // Module A
@@ -11,12 +10,14 @@ enum AppModule {
 class UserProfile {
   final String userId;
   final String username;
+  final String email; // 🟢 ADDED: Email field
   final String token;
   final List<AppModule> permissions;
 
   UserProfile({
     required this.userId,
     required this.username,
+    required this.email, // 🟢 ADDED: to Constructor
     required this.token,
     required this.permissions,
   });
@@ -25,8 +26,6 @@ class UserProfile {
     return permissions.contains(module);
   }
 
-  // --- NEW HELPERS (Copy this part!) ---
-  
   // Encode List -> String
   static String encodePermissions(List<AppModule> perms) {
     List<String> strList = perms.map((e) => e.toString()).toList();
