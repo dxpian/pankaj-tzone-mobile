@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 
 class GroupMapper {
   // 1. Define your mappings here

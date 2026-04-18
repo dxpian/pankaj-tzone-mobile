@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/sync_engine.dart';
-import '../models/logger_alert.dart';
 import 'logger_graph_screen.dart';
 
 class StatsScreen extends StatelessWidget {

@@ -28,6 +28,8 @@ dependencies:
   vibration: ^1.8.4
   shared_preferences: ^2.5.3
 
+  flutter_map: any
+  latlong2: any
 dev_dependencies:
   flutter_test:
     sdk: flutter

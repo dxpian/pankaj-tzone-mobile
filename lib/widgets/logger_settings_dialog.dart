@@ -151,7 +151,7 @@ class _LoggerSettingsDialogState extends State<LoggerSettingsDialog> {
             SwitchListTile(
               title: const Text("Enable Temp Alert"),
               value: _enableTempAlert,
-              activeColor: Colors.red,
+              activeThumbColor: Colors.red,
               onChanged: (v) => setState(() => _enableTempAlert = v),
             ),
             Row(
@@ -183,7 +183,7 @@ class _LoggerSettingsDialogState extends State<LoggerSettingsDialog> {
             SwitchListTile(
               title: const Text("Low Battery Alert"),
               value: _enableBattAlert,
-              activeColor: Colors.orange,
+              activeThumbColor: Colors.orange,
               onChanged: (v) => setState(() => _enableBattAlert = v),
             ),
             TextField(

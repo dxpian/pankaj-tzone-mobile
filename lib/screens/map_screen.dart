@@ -75,7 +75,7 @@ class _MapScreenState extends State<MapScreen> {
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(30),
-                boxShadow: [
+                boxShadow: const [
                   BoxShadow(color: Colors.black12, blurRadius: 10, offset: Offset(0, 4))
                 ],
               ),
@@ -104,7 +104,7 @@ class _MapScreenState extends State<MapScreen> {
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(24),
-                boxShadow: [
+                boxShadow: const [
                   BoxShadow(color: Colors.black12, blurRadius: 20, offset: Offset(0, 5))
                 ],
               ),

@@ -1,4 +1,3 @@
-import 'logger_alert.dart';
 
 class ClusterDefinition {
   final String name;
